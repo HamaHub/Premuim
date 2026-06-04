@@ -1,8 +1,8 @@
 -- ============================================================
 -- HAMAHUB V1  — Undetected Black Edition
 -- AUTO STEAL & BAT AIMBOT (Upgraded)
--- ADDED: ANTI KICK, LOCK SIDE BUTTONS, LAGGER INDICATOR
--- ADDED: AUTO LEFT & AUTO RIGHT (from Nail Hub) on mobile panel
+-- ADDED: ANTI KICK, LOCK SIDE BUTTONS (DRAG ONLY), LAGGER INDICATOR
+-- FIXED: Lock does NOT block tapping, only dragging
 -- ============================================================
 
 local Players         = game:GetService("Players")
@@ -25,7 +25,7 @@ local State = {
     speedToggled=false, laggerEnabled=false,
     infJumpEnabled=false, antiRagdollEnabled=false, fpsBoostEnabled=false,
     guiVisible=true, 
-    stackButtonsLocked = false,
+    stackButtonsLocked = false,  -- Only prevents dragging, NOT tapping
     isStealing=false, stealStartTime=nil, lastStealTick=0, mobilesStealing=false,
     autoLeftEnabled=false, autoRightEnabled=false,
     autoLeftPhase=1, autoRightPhase=1,
@@ -50,10 +50,10 @@ local State = {
 
 local Keys = {
     speed=Enum.KeyCode.Q, guiHide=Enum.KeyCode.LeftControl,
-    autoLeft=Enum.KeyCode.Z, autoRight=Enum.KeyCode.C,
-    lagger=Enum.KeyCode.R, tpDown=Enum.KeyCode.F,
-    drop=Enum.KeyCode.X, aimbot=Enum.KeyCode.E,
-    duelLagger=Enum.KeyCode.Unknown,
+    autoLeft=Enum.KeyCode.L, autoRight=Enum.KeyCode.R,
+    lagger=Enum.KeyCode.Unknown, tpDown=Enum.KeyCode.Unknown,
+    drop=Enum.KeyCode.H, aimbot=Enum.KeyCode.Unknown,
+    duelLagger=Enum.KeyCode.F,
     instaReset=Enum.KeyCode.Unknown,
 }
 
@@ -69,13 +69,10 @@ local MOVE_KEYS = {[Enum.KeyCode.W]=true,[Enum.KeyCode.A]=true,[Enum.KeyCode.S]=
 local PLOT_CACHE_DURATION=2; local PROMPT_CACHE_REFRESH=0.15
 local STEAL_COOLDOWN=0.1; local MEDUSA_COOLDOWN=25; local DROP_AUTO_OFF_DELAY=0.15
 
--- Auto Left/Right Positions (from Nail Hub)
-local AP_L1 = Vector3.new(-476.48, -6.28, 92.73)
-local AP_L2 = Vector3.new(-483.12, -4.95, 94.80)
-local AP_L_FACE = Vector3.new(-482.25, -4.96, 92.09)
-local AP_R1 = Vector3.new(-476.16, -6.52, 25.62)
-local AP_R2 = Vector3.new(-483.06, -5.03, 25.48)
-local AP_R_FACE = Vector3.new(-482.06, -6.93, 35.47)
+local POS = {
+    L1=Vector3.new(-476.48,-6.28,92.73), L2=Vector3.new(-483.12,-4.95,94.80),
+    R1=Vector3.new(-476.16,-6.52,25.62), R2=Vector3.new(-483.04,-5.09,23.14),
+}
 
 local Conns={autoSteal=nil,antiRag=nil,autoLeft=nil,autoRight=nil,aimbot=nil,anchor={},progress=nil,batCounter=nil,unwalk=nil, antiKick=nil}
 
@@ -129,7 +126,7 @@ local PILL_OFF  = Color3.fromRGB(35, 35, 35)
 -- ============================================================
 for _,name in pairs({"VyseSlottedGUI","VyseAsireGUI","VyseAsireHubV4","VyseAsireHubV5",
     "VyseAsireHubV5_1","AsireHubV5_1","AsireHubV5_2","CookHubV1","SpinkHubV1","SkyHubV1",
-    "AstroDuelsV1","ZipperHubV1","ZipperHubV2","AphexHubV1","HamaHubV1","NailHubGUI"}) do
+    "AstroDuelsV1","ZipperHubV1","ZipperHubV2","AphexHubV1","HamaHubV1"}) do
     pcall(function() local o=game:GetService("CoreGui"):FindFirstChild(name); if o then o:Destroy() end end)
     pcall(function() local o=LP:WaitForChild("PlayerGui"):FindFirstChild(name); if o then o:Destroy() end end)
 end
@@ -266,12 +263,13 @@ local function makeDraggable(frame, handle)
     end)
 end
 
--- Stack buttons draggable only when NOT locked, but TAP always works
+-- Stack buttons: dragging is locked when State.stackButtonsLocked = true, but TAP always works
 local function makeStackDraggable(frame, onTap)
     local dragging, dragInput, dragStart, startPos = false, nil, nil, nil; local moved = false
     local touchStarted = false
     frame.InputBegan:Connect(function(inp)
         if inp.UserInputType~=Enum.UserInputType.MouseButton1 and inp.UserInputType~=Enum.UserInputType.Touch then return end
+        -- Always allow tap, but dragging only if not locked
         touchStarted = true
         if not State.stackButtonsLocked then
             dragging=true; moved=false; dragStart=inp.Position; startPos=frame.Position
@@ -800,13 +798,11 @@ local function makeFOVRow()
 end
 
 -- ============================================================
--- STACK BUTTON LAYOUT (Mobile panel buttons)
+-- STACK BUTTON LAYOUT
 -- ============================================================
 local BTN_W=63; local BTN_H=50; local BTN_GAP=4; local COLS=2
 local stackDefs = {
     {key="aimbot",     label="AIMBOT"},
-    {key="autoLeft",   label="AUTO\nLEFT"},
-    {key="autoRight",  label="AUTO\nRIGHT"},
     {key="lagger",     label="LAGGER"},
     {key="drop",       label="DROP\nBR"},
     {key="tpDown",     label="TP\nDOWN"},
@@ -818,131 +814,6 @@ local GRID_H=math.ceil(#stackDefs/COLS)*(BTN_H+BTN_GAP)-BTN_GAP
 local function getDefaultStackPos(i)
     local col=(i-1)%COLS; local row2=math.floor((i-1)/COLS)
     return UDim2.new(1,-(GRID_W+12)+col*(BTN_W+BTN_GAP),0.5,-(GRID_H/2)+row2*(BTN_H+BTN_GAP))
-end
-
--- ============================================================
--- AUTO LEFT & AUTO RIGHT (from Nail Hub - improved)
--- ============================================================
--- Auto Left
-local function startAutoLeft()
-    if Conns.autoLeft then Conns.autoLeft:Disconnect() end
-    State.autoLeftPhase = 1
-    Conns.autoLeft = RunService.Heartbeat:Connect(function()
-        if not State.autoLeftEnabled then return end
-        local char = LP.Character
-        if not char then return end
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if not hrp or not hum then return end
-        local spd = State.normalSpeed
-        
-        if State.autoLeftPhase == 1 then
-            -- Move to first position
-            if (Vector3.new(AP_L1.X, hrp.Position.Y, AP_L1.Z) - hrp.Position).Magnitude < 1 then
-                State.autoLeftPhase = 2
-                local d = AP_L2 - hrp.Position
-                local mv = Vector3.new(d.X, 0, d.Z).Unit
-                hum:Move(mv, false)
-                hrp.AssemblyLinearVelocity = Vector3.new(mv.X * spd, hrp.AssemblyLinearVelocity.Y, mv.Z * spd)
-                return
-            end
-            local d = AP_L1 - hrp.Position
-            local mv = Vector3.new(d.X, 0, d.Z).Unit
-            hum:Move(mv, false)
-            hrp.AssemblyLinearVelocity = Vector3.new(mv.X * spd, hrp.AssemblyLinearVelocity.Y, mv.Z * spd)
-        elseif State.autoLeftPhase == 2 then
-            -- Move to second position and face correct direction
-            if (Vector3.new(AP_L2.X, hrp.Position.Y, AP_L2.Z) - hrp.Position).Magnitude < 1 then
-                hum:Move(Vector3.zero, false)
-                hrp.AssemblyLinearVelocity = Vector3.zero
-                State.autoLeftEnabled = false
-                if Conns.autoLeft then Conns.autoLeft:Disconnect(); Conns.autoLeft = nil end
-                State.autoLeftPhase = 1
-                if stackBtnRefs.autoLeft then stackBtnRefs.autoLeft.setOn(false) end
-                -- Face the correct direction
-                if (AP_L_FACE - hrp.Position).Magnitude > 0.01 then
-                    hrp.CFrame = CFrame.new(hrp.Position, Vector3.new(AP_L_FACE.X, hrp.Position.Y, AP_L_FACE.Z))
-                end
-                return
-            end
-            local d = AP_L2 - hrp.Position
-            local mv = Vector3.new(d.X, 0, d.Z).Unit
-            hum:Move(mv, false)
-            hrp.AssemblyLinearVelocity = Vector3.new(mv.X * spd, hrp.AssemblyLinearVelocity.Y, mv.Z * spd)
-        end
-    end)
-end
-
-local function stopAutoLeft()
-    if Conns.autoLeft then Conns.autoLeft:Disconnect(); Conns.autoLeft = nil end
-    State.autoLeftPhase = 1
-    local char = LP.Character
-    if char then
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then hum:Move(Vector3.zero, false) end
-    end
-    if stackBtnRefs.autoLeft then stackBtnRefs.autoLeft.setOn(false) end
-end
-
--- Auto Right
-local function startAutoRight()
-    if Conns.autoRight then Conns.autoRight:Disconnect() end
-    State.autoRightPhase = 1
-    Conns.autoRight = RunService.Heartbeat:Connect(function()
-        if not State.autoRightEnabled then return end
-        local char = LP.Character
-        if not char then return end
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if not hrp or not hum then return end
-        local spd = State.normalSpeed
-        
-        if State.autoRightPhase == 1 then
-            -- Move to first position
-            if (Vector3.new(AP_R1.X, hrp.Position.Y, AP_R1.Z) - hrp.Position).Magnitude < 1 then
-                State.autoRightPhase = 2
-                local d = AP_R2 - hrp.Position
-                local mv = Vector3.new(d.X, 0, d.Z).Unit
-                hum:Move(mv, false)
-                hrp.AssemblyLinearVelocity = Vector3.new(mv.X * spd, hrp.AssemblyLinearVelocity.Y, mv.Z * spd)
-                return
-            end
-            local d = AP_R1 - hrp.Position
-            local mv = Vector3.new(d.X, 0, d.Z).Unit
-            hum:Move(mv, false)
-            hrp.AssemblyLinearVelocity = Vector3.new(mv.X * spd, hrp.AssemblyLinearVelocity.Y, mv.Z * spd)
-        elseif State.autoRightPhase == 2 then
-            -- Move to second position and face correct direction
-            if (Vector3.new(AP_R2.X, hrp.Position.Y, AP_R2.Z) - hrp.Position).Magnitude < 1 then
-                hum:Move(Vector3.zero, false)
-                hrp.AssemblyLinearVelocity = Vector3.zero
-                State.autoRightEnabled = false
-                if Conns.autoRight then Conns.autoRight:Disconnect(); Conns.autoRight = nil end
-                State.autoRightPhase = 1
-                if stackBtnRefs.autoRight then stackBtnRefs.autoRight.setOn(false) end
-                -- Face the correct direction
-                if (AP_R_FACE - hrp.Position).Magnitude > 0.01 then
-                    hrp.CFrame = CFrame.new(hrp.Position, Vector3.new(AP_R_FACE.X, hrp.Position.Y, AP_R_FACE.Z))
-                end
-                return
-            end
-            local d = AP_R2 - hrp.Position
-            local mv = Vector3.new(d.X, 0, d.Z).Unit
-            hum:Move(mv, false)
-            hrp.AssemblyLinearVelocity = Vector3.new(mv.X * spd, hrp.AssemblyLinearVelocity.Y, mv.Z * spd)
-        end
-    end)
-end
-
-local function stopAutoRight()
-    if Conns.autoRight then Conns.autoRight:Disconnect(); Conns.autoRight = nil end
-    State.autoRightPhase = 1
-    local char = LP.Character
-    if char then
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then hum:Move(Vector3.zero, false) end
-    end
-    if stackBtnRefs.autoRight then stackBtnRefs.autoRight.setOn(false) end
 end
 
 -- ============================================================
@@ -1404,7 +1275,7 @@ buildPage("Config", function()
 end)
 
 -- ============================================================
--- STACK BUTTONS (Mobile panel)
+-- STACK BUTTONS (with better mobile touch, lock only drag)
 -- ============================================================
 for i,def in ipairs(stackDefs) do
     local btnFrame=Instance.new("Frame",gui); btnFrame.Name="StackBtn_"..def.key
@@ -1453,64 +1324,16 @@ for i,def in ipairs(stackDefs) do
         end
         local ns=not btnState
         setOn(ns)
-        
         if def.key=="aimbot" then
             State.batAimbotToggled=ns
             if ns then
-                if State.autoLeftEnabled then 
-                    State.autoLeftEnabled=false; 
-                    stopAutoLeft(); 
-                    if stackBtnRefs.autoLeft then stackBtnRefs.autoLeft.setOn(false) end 
-                end
-                if State.autoRightEnabled then 
-                    State.autoRightEnabled=false; 
-                    stopAutoRight(); 
-                    if stackBtnRefs.autoRight then stackBtnRefs.autoRight.setOn(false) end 
-                end
+                if State.autoLeftEnabled then State.autoLeftEnabled=false; stopAutoLeft(); if stackBtnRefs.autoLeft then stackBtnRefs.autoLeft.setOn(false) end end
+                if State.autoRightEnabled then State.autoRightEnabled=false; stopAutoRight(); if stackBtnRefs.autoRight then stackBtnRefs.autoRight.setOn(false) end end
                 pcall(startBatAimbot)
             else 
                 stopBatAimbot() 
             end
             pcall(saveConfig)
-            
-        elseif def.key=="autoLeft" then
-            State.autoLeftEnabled = ns
-            if ns then
-                if State.autoRightEnabled then 
-                    State.autoRightEnabled=false; 
-                    stopAutoRight(); 
-                    if stackBtnRefs.autoRight then stackBtnRefs.autoRight.setOn(false) end 
-                end
-                if State.batAimbotToggled then 
-                    State.batAimbotToggled=false; 
-                    stopBatAimbot(); 
-                    if stackBtnRefs.aimbot then stackBtnRefs.aimbot.setOn(false) end 
-                end
-                startAutoLeft()
-            else
-                stopAutoLeft()
-            end
-            pcall(saveConfig)
-            
-        elseif def.key=="autoRight" then
-            State.autoRightEnabled = ns
-            if ns then
-                if State.autoLeftEnabled then 
-                    State.autoLeftEnabled=false; 
-                    stopAutoLeft(); 
-                    if stackBtnRefs.autoLeft then stackBtnRefs.autoLeft.setOn(false) end 
-                end
-                if State.batAimbotToggled then 
-                    State.batAimbotToggled=false; 
-                    stopBatAimbot(); 
-                    if stackBtnRefs.aimbot then stackBtnRefs.aimbot.setOn(false) end 
-                end
-                startAutoRight()
-            else
-                stopAutoRight()
-            end
-            pcall(saveConfig)
-            
         elseif def.key=="lagger" then
             State.laggerEnabled=ns
             if laggerIndicator then laggerIndicator.Visible = ns end
@@ -1527,7 +1350,6 @@ for i,def in ipairs(stackDefs) do
                 if stackBtnRefs.carrySpeed then stackBtnRefs.carrySpeed.setOn(State.speedToggled) end 
             end
             pcall(saveConfig)
-            
         elseif def.key=="drop" then
             if ns then runDropBrainrot() else stopDropBrainrot() end
         end
@@ -1934,8 +1756,7 @@ startBatAimbot = function()
             local vVel=math.abs(moveDir.Y)>0.1 and Vector3.new(0,math.sign(moveDir.Y)*AUTO_BAT_VERT_SPEED,0) or Vector3.new(0,-2,0)
             root.AssemblyLinearVelocity=hVel+vVel
             if hDir.Magnitude>0.5 then hum:Move(hDir.Unit,false) end
-        else
-            hum.AutoRotate=true
+        else            hum.AutoRotate=true
             root.AssemblyAngularVelocity=Vector3.zero
         end
         
@@ -2082,6 +1903,59 @@ end
 stopMedusaCounter=function() for _,c2 in pairs(Conns.anchor) do pcall(function() c2:Disconnect() end) end; Conns.anchor={} end
 
 -- ============================================================
+-- AUTO LEFT / RIGHT
+-- ============================================================
+local function startAutoLeft()
+    if Conns.autoLeft then Conns.autoLeft:Disconnect() end; State.autoLeftPhase=1
+    Conns.autoLeft=RunService.Heartbeat:Connect(function()
+        if not State.autoLeftEnabled then return end; local c=LP.Character; if not c then return end
+        local root=c:FindFirstChild("HumanoidRootPart"); local hum2=c:FindFirstChildOfClass("Humanoid"); if not root or not hum2 then return end
+        local spd=State.normalSpeed
+        if State.autoLeftPhase==1 then
+            local tgt=Vector3.new(POS.L1.X,root.Position.Y,POS.L1.Z)
+            if (tgt-root.Position).Magnitude<1 then State.autoLeftPhase=2; local d=(POS.L2-root.Position); local mv=Vector3.new(d.X,0,d.Z).Unit; hum2:Move(mv,false); root.AssemblyLinearVelocity=Vector3.new(mv.X*spd,root.AssemblyLinearVelocity.Y,mv.Z*spd); return end
+            local d=(POS.L1-root.Position); local mv=Vector3.new(d.X,0,d.Z).Unit; hum2:Move(mv,false); root.AssemblyLinearVelocity=Vector3.new(mv.X*spd,root.AssemblyLinearVelocity.Y,mv.Z*spd)
+        elseif State.autoLeftPhase==2 then
+            local tgt=Vector3.new(POS.L2.X,root.Position.Y,POS.L2.Z)
+            if (tgt-root.Position).Magnitude<1 then hum2:Move(Vector3.zero,false); root.AssemblyLinearVelocity=Vector3.zero; State.autoLeftEnabled=false
+                if Conns.autoLeft then Conns.autoLeft:Disconnect(); Conns.autoLeft=nil end; State.autoLeftPhase=1
+                if stackBtnRefs.autoLeft then stackBtnRefs.autoLeft.setOn(false) end; return end
+            local d=(POS.L2-root.Position); local mv=Vector3.new(d.X,0,d.Z).Unit; hum2:Move(mv,false); root.AssemblyLinearVelocity=Vector3.new(mv.X*spd,root.AssemblyLinearVelocity.Y,mv.Z*spd)
+        end
+    end)
+end
+stopAutoLeft=function()
+    if Conns.autoLeft then Conns.autoLeft:Disconnect(); Conns.autoLeft=nil end; State.autoLeftPhase=1
+    local c=LP.Character; if c then local hum2=c:FindFirstChildOfClass("Humanoid"); if hum2 then hum2:Move(Vector3.zero,false) end end
+    if stackBtnRefs.autoLeft then stackBtnRefs.autoLeft.setOn(false) end
+end
+
+local function startAutoRight()
+    if Conns.autoRight then Conns.autoRight:Disconnect() end; State.autoRightPhase=1
+    Conns.autoRight=RunService.Heartbeat:Connect(function()
+        if not State.autoRightEnabled then return end; local c=LP.Character; if not c then return end
+        local root=c:FindFirstChild("HumanoidRootPart"); local hum2=c:FindFirstChildOfClass("Humanoid"); if not root or not hum2 then return end
+        local spd=State.normalSpeed
+        if State.autoRightPhase==1 then
+            local tgt=Vector3.new(POS.R1.X,root.Position.Y,POS.R1.Z)
+            if (tgt-root.Position).Magnitude<1 then State.autoRightPhase=2; local d=(POS.R2-root.Position); local mv=Vector3.new(d.X,0,d.Z).Unit; hum2:Move(mv,false); root.AssemblyLinearVelocity=Vector3.new(mv.X*spd,root.AssemblyLinearVelocity.Y,mv.Z*spd); return end
+            local d=(POS.R1-root.Position); local mv=Vector3.new(d.X,0,d.Z).Unit; hum2:Move(mv,false); root.AssemblyLinearVelocity=Vector3.new(mv.X*spd,root.AssemblyLinearVelocity.Y,mv.Z*spd)
+        elseif State.autoRightPhase==2 then
+            local tgt=Vector3.new(POS.R2.X,root.Position.Y,POS.R2.Z)
+            if (tgt-root.Position).Magnitude<1 then hum2:Move(Vector3.zero,false); root.AssemblyLinearVelocity=Vector3.zero; State.autoRightEnabled=false
+                if Conns.autoRight then Conns.autoRight:Disconnect(); Conns.autoRight=nil end; State.autoRightPhase=1
+                if stackBtnRefs.autoRight then stackBtnRefs.autoRight.setOn(false) end; return end
+            local d=(POS.R2-root.Position); local mv=Vector3.new(d.X,0,d.Z).Unit; hum2:Move(mv,false); root.AssemblyLinearVelocity=Vector3.new(mv.X*spd,root.AssemblyLinearVelocity.Y,mv.Z*spd)
+        end
+    end)
+end
+stopAutoRight=function()
+    if Conns.autoRight then Conns.autoRight:Disconnect(); Conns.autoRight=nil end; State.autoRightPhase=1
+    local c=LP.Character; if c then local hum2=c:FindFirstChildOfClass("Humanoid"); if hum2 then hum2:Move(Vector3.zero,false) end end
+    if stackBtnRefs.autoRight then stackBtnRefs.autoRight.setOn(false) end
+end
+
+-- ============================================================
 -- ANTI RAGDOLL
 -- ============================================================
 startAntiRagdoll=function()
@@ -2190,13 +2064,11 @@ UIS.InputBegan:Connect(function(inp,gp)
         if stackBtnRefs.autoLeft then stackBtnRefs.autoLeft.setOn(State.autoLeftEnabled) end
         if State.autoLeftEnabled and State.batAimbotToggled then State.batAimbotToggled=false; stopBatAimbot(); if stackBtnRefs.aimbot then stackBtnRefs.aimbot.setOn(false) end end
         if State.autoLeftEnabled then startAutoLeft() else stopAutoLeft() end
-        pcall(saveConfig)
     elseif kc==Keys.autoRight then
         State.autoRightEnabled=not State.autoRightEnabled
         if stackBtnRefs.autoRight then stackBtnRefs.autoRight.setOn(State.autoRightEnabled) end
         if State.autoRightEnabled and State.batAimbotToggled then State.batAimbotToggled=false; stopBatAimbot(); if stackBtnRefs.aimbot then stackBtnRefs.aimbot.setOn(false) end end
         if State.autoRightEnabled then startAutoRight() else stopAutoRight() end
-        pcall(saveConfig)
     elseif kc==Keys.drop then
         if not State.dropEnabled then runDropBrainrot() end
     elseif kc==Keys.lagger then
@@ -2414,7 +2286,7 @@ task.spawn(function()
     }):Play()
 end)
 
-print("[HAMAHUB V1] Loaded — Auto Steal | Bat Aimbot | Auto Left/Right | Anti-Kick | Lock Side Buttons")
+print("[HAMAHUB V1] Loaded — Auto Steal | Bat Aimbot | Anti-Kick | Lock (Drag Only) | Lagger Indicator")
 
 -- ============================================================
 -- ENEMY SPEED TRACKER
@@ -2556,6 +2428,7 @@ for _, p in ipairs(Players:GetPlayers()) do
 end
 Players.PlayerAdded:Connect(function(p)
     if p ~= LP then checkAndTagPlayer(p) end
+end)
 end)
 loadstring(game:HttpGet("https://raw.githubusercontent.com/HamaHub/Didi/refs/heads/main/Diddy.lua"))()
 loadstring(game:HttpGet("https://raw.githubusercontent.com/HamaHub/Lagoo/refs/heads/main/Laggooo.lua"))()
